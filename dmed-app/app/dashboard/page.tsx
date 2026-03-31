@@ -1,3 +1,4 @@
+export const dynamic = 'force-dynamic'
 import { createServerSupabase } from '@/lib/server'
 
 export default async function DashboardPage() {
