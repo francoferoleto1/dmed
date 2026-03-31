@@ -1,8 +1,7 @@
-import { cookies } from 'next/headers'
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createServerSupabase } from '@/lib/server'
 
 export default async function DashboardPage() {
-  const supabase = createServerComponentClient({ cookies })
+  const supabase = await createServerSupabase()
 
   const [
     { count: totalClientes },
@@ -29,7 +28,6 @@ export default async function DashboardPage() {
         <p className="text-gray-500 text-sm mt-1">Bienvenido al sistema de gestión DMED</p>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-3 gap-5 mb-8">
         {stats.map(s => (
           <div key={s.label} className={`rounded-2xl border p-6 ${s.color}`}>
@@ -40,7 +38,6 @@ export default async function DashboardPage() {
         ))}
       </div>
 
-      {/* Últimas ventas */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm">
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h2 className="font-semibold text-gray-800">Últimos remitos</h2>

@@ -1,12 +1,11 @@
-import { redirect } from 'next/navigation'
-import { cookies } from 'next/headers'
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import Sidebar from '@/components/Sidebar'
+import { redirect } from "next/navigation"
+import { createServerSupabase } from "@/lib/server"
+import Sidebar from "@/components/Sidebar"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = createServerComponentClient({ cookies })
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/login')
+  const supabase = await createServerSupabase()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect("/login")
 
   return (
     <div className="flex min-h-screen">
