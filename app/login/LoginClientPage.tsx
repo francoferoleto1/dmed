@@ -16,15 +16,21 @@ export default function LoginClientPage() {
     setLoading(true)
     setError('')
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (error) {
-      setError('Email o contraseña incorrectos.')
-      setLoading(false)
-    } else {
+      if (error) {
+        setError(error.message || 'Email o contrasena incorrectos.')
+        return
+      }
+
       router.push('/dashboard')
       router.refresh()
+    } catch {
+      setError('No se pudo iniciar sesion. Verifica la configuracion de Supabase.')
+    } finally {
+      setLoading(false)
     }
   }
 
