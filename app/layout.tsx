@@ -1,17 +1,19 @@
-import { redirect } from "next/navigation"
-import { createServerSupabase } from "@/lib/server"
-import MainContent from "@/components/MainContent"
-import Sidebar from "@/components/Sidebar"
+import type { Metadata } from 'next'
+import ToasterProvider from '@/components/ToasterProvider'
+import './globals.css'
 
-export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createServerSupabase()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
+export const metadata: Metadata = {
+  title: 'DMED — Gestión',
+  description: 'Sistema de gestión de distribuidora médica',
+}
 
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <MainContent>{children}</MainContent>
-    </div>
+    <html lang="es">
+      <body className="min-h-screen antialiased">
+        {children}
+        <ToasterProvider />
+      </body>
+    </html>
   )
 }
