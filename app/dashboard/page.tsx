@@ -7,42 +7,46 @@ import { STOCK_LOW_THRESHOLD } from '@/lib/stock'
 export default async function DashboardPage() {
   const supabase = await createServerSupabase()
 
-  // Queries con null safety — no destructuramos directo
-  const [clientesRes, articulosRes, ventasRes, stockBajoRes, ultimasVentasRes] =
-    await Promise.all([
-      supabase
-        .from('clientes')
-        .select('*', { count: 'exact', head: true })
-        .catch(() => ({ count: null, data: null, error: null })),
-      supabase
-        .from('articulos')
-        .select('*', { count: 'exact', head: true })
-        .eq('descontinuado', false)
-        .catch(() => ({ count: null, data: null, error: null })),
-      supabase
-        .from('ventas')
-        .select('*', { count: 'exact', head: true })
-        .catch(() => ({ count: null, data: null, error: null })),
-      supabase
-        .from('articulos')
-        .select('*', { count: 'exact', head: true })
-        .eq('descontinuado', false)
-        .lt('stock', STOCK_LOW_THRESHOLD)
-        .catch(() => ({ count: null, data: null, error: null })),
-      supabase
-        .from('ventas')
-        .select('control, fecha, total, clientes(nombre)')
-        .order('fecha', { ascending: false })
-        .limit(5)
-        .catch(() => ({ count: null, data: null, error: null })),
-    ])
+  let totalClientes = 0
+  let totalArticulos = 0
+  let totalVentas = 0
+  let stockBajoCount = 0
+  let ultimasVentas: any[] = []
 
-  // Extraer con ?? 0 para que NUNCA sea undefined
-  const totalClientes = clientesRes?.count ?? 0
-  const totalArticulos = articulosRes?.count ?? 0
-  const totalVentas = ventasRes?.count ?? 0
-  const stockBajoCount = stockBajoRes?.count ?? 0
-  const ultimasVentas = (ultimasVentasRes?.data ?? []) as any[]
+  // Clientes
+  const resClientes = await supabase
+    .from('clientes')
+    .select('*', { count: 'exact', head: true })
+  totalClientes = resClientes.count ?? 0
+
+  // Artículos activos
+  const resArticulos = await supabase
+    .from('articulos')
+    .select('*', { count: 'exact', head: true })
+    .eq('descontinuado', false)
+  totalArticulos = resArticulos.count ?? 0
+
+  // Ventas
+  const resVentas = await supabase
+    .from('ventas')
+    .select('*', { count: 'exact', head: true })
+  totalVentas = resVentas.count ?? 0
+
+  // Stock bajo
+  const resStockBajo = await supabase
+    .from('articulos')
+    .select('*', { count: 'exact', head: true })
+    .eq('descontinuado', false)
+    .lt('stock', STOCK_LOW_THRESHOLD)
+  stockBajoCount = resStockBajo.count ?? 0
+
+  // Últimas ventas
+  const resUltimas = await supabase
+    .from('ventas')
+    .select('control, fecha, total, clientes(nombre)')
+    .order('fecha', { ascending: false })
+    .limit(5)
+  ultimasVentas = (resUltimas.data ?? []) as any[]
 
   const baseStats = [
     {
