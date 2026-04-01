@@ -1,15 +1,34 @@
 'use client'
+
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import {
+  LayoutDashboard,
+  FileText,
+  FilePlus2,
+  Users,
+  Package,
+  LogOut,
+  Pill,
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase'
 
 const nav = [
-  { href: '/dashboard', label: 'Inicio', icon: '◈' },
-  { href: '/ventas', label: 'Remitos', icon: '🧾' },
-  { href: '/ventas/nueva', label: 'Nuevo Remito', icon: '＋' },
-  { href: '/clientes', label: 'Clientes', icon: '👥' },
-  { href: '/articulos', label: 'Artículos', icon: '💊' },
-]
+  { href: '/dashboard', label: 'Inicio', Icon: LayoutDashboard },
+  { href: '/ventas', label: 'Remitos', Icon: FileText },
+  { href: '/ventas/nueva', label: 'Nuevo remito', Icon: FilePlus2 },
+  { href: '/clientes', label: 'Clientes', Icon: Users },
+  { href: '/articulos', label: 'Artículos', Icon: Package },
+] as const
+
+function isActive(pathname: string, href: string) {
+  if (href === '/dashboard') return pathname === '/dashboard'
+  if (href === '/ventas/nueva') return pathname === '/ventas/nueva'
+  if (href === '/ventas') return pathname.startsWith('/ventas') && pathname !== '/ventas/nueva'
+  if (href === '/clientes') return pathname.startsWith('/clientes')
+  if (href === '/articulos') return pathname.startsWith('/articulos')
+  return pathname === href
+}
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -23,48 +42,55 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-56 min-h-screen bg-brand-800 flex flex-col fixed left-0 top-0">
-      {/* Logo */}
-      <div className="px-6 py-6 border-b border-brand-700">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-brand-400 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">D</span>
+    <aside className="fixed left-0 top-0 z-40 flex h-screen w-56 shrink-0 flex-col border-r border-white/10 bg-gradient-to-b from-slate-950 via-brand-950 to-slate-900 shadow-xl sm:w-64">
+      <div className="border-b border-white/10 px-4 py-6 sm:px-5">
+        <Link href="/dashboard" className="group flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-600 shadow-lg shadow-brand-900/40 transition-transform duration-200 group-hover:scale-[1.03]">
+            <Pill className="h-5 w-5 text-white" aria-hidden />
           </div>
           <div>
-            <p className="text-white font-bold text-base leading-none">DMED</p>
-            <p className="text-brand-300 text-xs mt-0.5">Gestión</p>
+            <p className="text-lg font-bold tracking-tight text-white">DMED</p>
+            <p className="text-xs font-medium text-brand-200/90">Gestión farmacéutica</p>
           </div>
-        </div>
+        </Link>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-3 py-4 space-y-1">
-        {nav.map(item => {
-          const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href) && item.href !== '/ventas/nueva')
+      <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-2 py-4 sm:px-3">
+        {nav.map(({ href, label, Icon }) => {
+          const active = isActive(pathname, href)
           return (
             <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              key={href}
+              href={href}
+              className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
                 active
-                  ? 'bg-brand-600 text-white'
-                  : 'text-brand-200 hover:bg-brand-700 hover:text-white'
+                  ? 'bg-white/12 text-white shadow-inner'
+                  : 'text-slate-300 hover:bg-white/6 hover:text-white'
               }`}
             >
-              <span className="text-base">{item.icon}</span>
-              {item.label}
+              {active && (
+                <span className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-r-full bg-brand-400 shadow-[0_0_12px_rgba(96,165,250,0.6)]" />
+              )}
+              <Icon
+                className={`h-[18px] w-[18px] shrink-0 transition-transform duration-200 ${
+                  active ? 'text-brand-300' : 'text-slate-400 group-hover:text-brand-200 group-hover:scale-105'
+                }`}
+                aria-hidden
+              />
+              <span className="truncate">{label}</span>
             </Link>
           )
         })}
       </nav>
 
-      {/* Logout */}
-      <div className="px-3 py-4 border-t border-brand-700">
+      <div className="border-t border-white/10 p-2 sm:p-3">
         <button
+          type="button"
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-brand-300 hover:bg-brand-700 hover:text-white transition-colors"
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-400 transition-all duration-200 hover:bg-red-500/10 hover:text-red-200"
         >
-          <span>↩</span> Salir
+          <LogOut className="h-[18px] w-[18px] shrink-0" aria-hidden />
+          Salir
         </button>
       </div>
     </aside>

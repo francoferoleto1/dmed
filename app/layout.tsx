@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import ToasterProvider from '@/components/ToasterProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -9,7 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body className="min-h-screen antialiased">
+        {children}
+        <ToasterProvider />
+      </body>
     </html>
   )
 }

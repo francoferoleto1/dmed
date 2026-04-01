@@ -1,16 +1,25 @@
 'use client'
 export const dynamic = 'force-dynamic'
-import { useEffect, useState } from 'react'
+
+import Link from 'next/link'
+import { useEffect, useMemo, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import Modal from '@/components/ui/Modal'
+import TableSkeleton from '@/components/ui/TableSkeleton'
 import { createClient, Articulo } from '@/lib/supabase'
+import { stockAmountClass } from '@/lib/stock'
 
 export default function ArticulosPage() {
   const [articulos, setArticulos] = useState<Articulo[]>([])
   const [busqueda, setBusqueda] = useState('')
+  const [laboratorioFiltro, setLaboratorioFiltro] = useState('')
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState<Articulo | null>(null)
   const [form, setForm] = useState<Partial<Articulo>>({})
   const [guardando, setGuardando] = useState(false)
   const [soloActivos, setSoloActivos] = useState(true)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({})
   const supabase = createClient()
 
   const cargar = async () => {
@@ -20,150 +29,270 @@ export default function ArticulosPage() {
     setLoading(false)
   }
 
-  useEffect(() => { cargar() }, [])
+  useEffect(() => {
+    cargar()
+  }, [])
 
-  const filtrados = articulos.filter(a => {
-    if (soloActivos && a.descontinuado) return false
-    return (
-      a.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-      a.codigo.toLowerCase().includes(busqueda.toLowerCase()) ||
-      (a.laboratorio ?? '').toLowerCase().includes(busqueda.toLowerCase())
-    )
-  })
+  const laboratoriosUnicos = useMemo(() => {
+    const set = new Set<string>()
+    for (const a of articulos) {
+      const l = (a.laboratorio ?? '').trim()
+      if (l) set.add(l)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
+  }, [articulos])
+
+  const filtrados = useMemo(() => {
+    const q = busqueda.trim().toLowerCase()
+    return articulos.filter(a => {
+      if (soloActivos && a.descontinuado) return false
+      if (laboratorioFiltro) {
+        const lab = (a.laboratorio ?? '').trim()
+        if (lab !== laboratorioFiltro) return false
+      }
+      if (!q) return true
+      const codigoNorm = String(a.codigo ?? '').toLowerCase()
+      return (
+        a.nombre.toLowerCase().includes(q) ||
+        codigoNorm.includes(q) ||
+        (a.laboratorio ?? '').toLowerCase().includes(q)
+      )
+    })
+  }, [articulos, busqueda, soloActivos, laboratorioFiltro])
 
   const abrirNuevo = () => {
+    setFieldErrors({})
     setForm({ precio: 0, precio_publico: 0, stock: 0, descontinuado: false })
     setModal({} as Articulo)
   }
 
-  const abrirEditar = (a: Articulo) => { setForm(a); setModal(a) }
-
-  const guardar = async () => {
-    setGuardando(true)
-    if (modal?.id) {
-      await supabase.from('articulos').update(form).eq('id', modal.id)
-    } else {
-      await supabase.from('articulos').insert(form)
-    }
-    setGuardando(false)
-    setModal(null)
-    cargar()
+  const abrirEditar = (a: Articulo) => {
+    setFieldErrors({})
+    setForm(a)
+    setModal(a)
   }
 
-  const f = (k: keyof Articulo) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setForm(prev => ({ ...prev, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
+  const guardar = async () => {
+    const nombreOk = !!(form.nombre ?? '').toString().trim()
+    const codigoOk = !!(form.codigo ?? '').toString().trim()
+    setFieldErrors({ nombre: !nombreOk, codigo: !codigoOk })
+    if (!nombreOk || !codigoOk) {
+      toast.error('Completá código y nombre.')
+      return
+    }
+
+    setGuardando(true)
+    try {
+      if (modal?.id) {
+        const { error } = await supabase.from('articulos').update(form).eq('id', modal.id)
+        if (error) throw error
+        toast.success('Artículo actualizado.')
+      } else {
+        const { error } = await supabase.from('articulos').insert(form)
+        if (error) throw error
+        toast.success('Artículo creado.')
+      }
+      setModal(null)
+      cargar()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar.')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  const f = (k: keyof Articulo) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFieldErrors(prev => ({ ...prev, [k]: false }))
+    setForm(prev => ({
+      ...prev,
+      [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value,
+    }))
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Artículos</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{filtrados.length} artículos</p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">Artículos</h1>
+          <p className="mt-1 text-sm text-gray-600">{filtrados.length} artículos mostrados</p>
         </div>
-        <button onClick={abrirNuevo}
-          className="bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
-          + Nuevo artículo
+        <button type="button" onClick={abrirNuevo} className="btn-primary w-full sm:w-auto">
+          <Plus className="h-4 w-4" />
+          Nuevo artículo
         </button>
       </div>
 
-      {/* Filtros */}
-      <div className="flex gap-4 mb-5 items-center">
-        <input type="text" placeholder="Buscar por nombre, código o laboratorio..."
-          value={busqueda} onChange={e => setBusqueda(e.target.value)}
-          className="w-full max-w-sm px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-          <input type="checkbox" checked={soloActivos} onChange={e => setSoloActivos(e.target.checked)}
-            className="accent-brand-600 w-4 h-4" />
+      <div className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-card">
+        <div className="min-w-[12rem] flex-1">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Buscar
+          </label>
+          <input
+            type="text"
+            placeholder="Nombre, código o laboratorio..."
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+            className="input-base"
+          />
+        </div>
+        <div className="min-w-[13rem]">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Laboratorio
+          </label>
+          <select
+            value={laboratorioFiltro}
+            onChange={e => setLaboratorioFiltro(e.target.value)}
+            className="input-base"
+            aria-label="Filtrar por laboratorio"
+          >
+            <option value="">Todos los laboratorios</option>
+            {laboratoriosUnicos.map(lab => (
+              <option key={lab} value={lab}>
+                {lab}
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm text-gray-700 select-none">
+          <input
+            type="checkbox"
+            checked={soloActivos}
+            onChange={e => setSoloActivos(e.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+          />
           Solo activos
         </label>
       </div>
 
-      {/* Tabla */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="table-wrap">
+        <table className="table-data min-w-[900px]">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Código</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nombre</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Present.</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Lab.</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Precio</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Stock</th>
-              <th className="px-5 py-3"></th>
+            <tr>
+              <th>Código</th>
+              <th>Nombre</th>
+              <th>Present.</th>
+              <th>Lab.</th>
+              <th className="text-right">Precio</th>
+              <th className="text-right">Stock</th>
+              <th className="text-right w-40">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
-            {loading ? (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">Cargando...</td></tr>
-            ) : filtrados.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-12 text-gray-400">Sin resultados</td></tr>
-            ) : filtrados.map(a => (
-              <tr key={a.id} className={`hover:bg-gray-50 transition-colors ${a.descontinuado ? 'opacity-50' : ''}`}>
-                <td className="px-5 py-3 font-mono text-xs text-gray-500">{a.codigo}</td>
-                <td className="px-5 py-3 font-medium text-gray-800">{a.nombre}</td>
-                <td className="px-5 py-3 text-gray-500 text-xs">{a.presentacion ?? '—'}</td>
-                <td className="px-5 py-3 text-gray-500 text-xs">{a.laboratorio ?? '—'}</td>
-                <td className="px-5 py-3 text-right font-semibold text-gray-800">
-                  ${Number(a.precio).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                </td>
-                <td className="px-5 py-3 text-right text-gray-600">{a.stock}</td>
-                <td className="px-5 py-3 text-right">
-                  <button onClick={() => abrirEditar(a)}
-                    className="text-brand-600 hover:text-brand-800 font-medium text-xs">
-                    Editar
-                  </button>
+          {loading ? (
+            <TableSkeleton rows={8} cols={7} />
+          ) : filtrados.length === 0 ? (
+            <tbody>
+              <tr>
+                <td colSpan={7} className="py-14 text-center text-gray-500">
+                  Sin resultados
                 </td>
               </tr>
-            ))}
-          </tbody>
+            </tbody>
+          ) : (
+            <tbody>
+              {filtrados.map(a => (
+                <tr
+                  key={a.id}
+                  className={
+                    a.descontinuado ? 'bg-gray-50/70 opacity-[0.92]' : ''
+                  }
+                >
+                  <td className="font-mono text-xs text-gray-600">{a.codigo}</td>
+                  <td className="font-medium">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>{a.nombre}</span>
+                      {a.descontinuado && (
+                        <span className="inline-flex items-center rounded-md border border-red-100 bg-red-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                          Descontinuado
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="text-xs text-gray-600">{a.presentacion ?? '—'}</td>
+                  <td className="text-xs text-gray-600">{a.laboratorio ?? '—'}</td>
+                  <td className="text-right font-semibold tabular-nums">
+                    ${Number(a.precio).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className={`text-right ${stockAmountClass(a.stock)}`}>{a.stock}</td>
+                  <td className="text-right">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Link
+                        href={`/articulos/${a.id}/movimientos`}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                      >
+                        Movimientos
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => abrirEditar(a)}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
+                      >
+                        Editar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
       </div>
 
-      {/* Modal */}
-      {modal !== null && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-5">
-              {modal.id ? 'Editar artículo' : 'Nuevo artículo'}
-            </h2>
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { label: 'Código', key: 'codigo', col: 1 },
-                { label: 'Laboratorio', key: 'laboratorio', col: 1 },
-                { label: 'Nombre', key: 'nombre', col: 2 },
-                { label: 'Presentación', key: 'presentacion', col: 1 },
-                { label: 'Registro', key: 'registro', col: 1 },
-                { label: 'Precio', key: 'precio', col: 1 },
-                { label: 'Precio público', key: 'precio_publico', col: 1 },
-                { label: 'Stock', key: 'stock', col: 1 },
-              ].map(({ label, key, col }) => (
-                <div key={key} className={col === 2 ? 'col-span-2' : ''}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-                  <input type="text" value={(form as any)[key] ?? ''}
-                    onChange={f(key as keyof Articulo)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-                </div>
-              ))}
-              <div className="col-span-2 flex items-center gap-2">
-                <input type="checkbox" id="desc" checked={!!form.descontinuado}
-                  onChange={e => setForm(prev => ({ ...prev, descontinuado: e.target.checked }))}
-                  className="accent-brand-600 w-4 h-4" />
-                <label htmlFor="desc" className="text-sm text-gray-600">Descontinuado</label>
-              </div>
+      <Modal
+        open={modal !== null}
+        onClose={() => setModal(null)}
+        title={modal?.id ? 'Editar artículo' : 'Nuevo artículo'}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <button type="button" className="btn-secondary" onClick={() => setModal(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="btn-primary" onClick={guardar} disabled={guardando}>
+              {guardando ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-2 gap-4">
+          {[
+            { label: 'Código', key: 'codigo' as const, col: 1, required: true },
+            { label: 'Laboratorio', key: 'laboratorio' as const, col: 1 },
+            { label: 'Nombre', key: 'nombre' as const, col: 2, required: true },
+            { label: 'Presentación', key: 'presentacion' as const, col: 1 },
+            { label: 'Registro', key: 'registro' as const, col: 1 },
+            { label: 'Precio', key: 'precio' as const, col: 1 },
+            { label: 'Precio público', key: 'precio_publico' as const, col: 1 },
+            { label: 'Stock', key: 'stock' as const, col: 1 },
+          ].map(({ label, key, col, required }) => (
+            <div key={key} className={col === 2 ? 'col-span-2' : ''}>
+              <label className="mb-1.5 block text-xs font-semibold text-gray-600">{label}</label>
+              <input
+                type="text"
+                value={(form as any)[key] ?? ''}
+                onChange={f(key)}
+                className={`input-base ${fieldErrors[key] ? 'input-error' : ''}`}
+              />
+              {required && fieldErrors[key] && (
+                <p className="mt-1 text-xs text-red-600">Requerido</p>
+              )}
             </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setModal(null)}
-                className="px-5 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
-                Cancelar
-              </button>
-              <button onClick={guardar} disabled={guardando}
-                className="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold disabled:opacity-60">
-                {guardando ? 'Guardando...' : 'Guardar'}
-              </button>
-            </div>
+          ))}
+          <div className="col-span-2 flex items-center gap-2 pt-1">
+            <input
+              type="checkbox"
+              id="desc"
+              checked={!!form.descontinuado}
+              onChange={e =>
+                setForm(prev => ({ ...prev, descontinuado: e.target.checked }))
+              }
+              className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+            />
+            <label htmlFor="desc" className="text-sm text-gray-700">
+              Descontinuado
+            </label>
           </div>
         </div>
-      )}
+      </Modal>
     </div>
   )
 }

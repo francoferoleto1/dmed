@@ -1,6 +1,7 @@
 'use client'
 export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { createClient, Cliente, Articulo } from '@/lib/supabase'
 import { generarRemitoPDF } from '@/lib/pdf'
 import { useRouter } from 'next/navigation'
@@ -17,6 +18,7 @@ export default function NuevoRemitoPage() {
   const [fecha, setFecha] = useState(new Date().toISOString().split('T')[0])
   const [detalle, setDetalle] = useState('')
   const [guardando, setGuardando] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
   const router = useRouter()
   const supabase = createClient()
 
@@ -72,36 +74,209 @@ export default function NuevoRemitoPage() {
   const guardar = async () => {
     if (!clienteId || items.length === 0) return
     setGuardando(true)
+    setErrorMsg('')
 
-    // Obtener próximo número de control
+    const cliente = clientes.find(c => c.id === clienteId)
+    if (!cliente) {
+      const m = 'Cliente no encontrado.'
+      setErrorMsg(m)
+      toast.error(m)
+      setGuardando(false)
+      return
+    }
+
+    const stockWarnings: string[] = []
+    const stockRollback: { articuloId: number; cantidad: number }[] = []
+
     const { data: maxData } = await supabase.from('ventas').select('control').order('control', { ascending: false }).limit(1)
     const control = ((maxData?.[0]?.control) ?? 0) + 1
 
-    await supabase.from('ventas').insert({
-      control, fecha, cliente_id: clienteId, total, tipo: 1, detalle, es_historico: false
-    })
+    let ventaId: number | null = null
+    let saldoClienteAntesRemito: number | null = null
 
-    await supabase.from('ventas_items').insert(items.map(i => ({
-      venta_control: control,
-      articulo_codigo: i.articulo.codigo,
-      cantidad: i.cantidad,
-      precio: i.precio,
-      descuento: i.descuento,
-      importe: i.importe,
-    })))
+    try {
+      const { data: ventaRow, error: errVenta } = await supabase
+        .from('ventas')
+        .insert({
+          control,
+          fecha,
+          cliente_id: clienteId,
+          total,
+          tipo: 1,
+          detalle,
+          es_historico: false,
+        })
+        .select('id')
+        .single()
 
-    // Generar PDF automáticamente
-    const cliente = clientes.find(c => c.id === clienteId)!
-    const venta = { id: 0, control, fecha, cliente_id: clienteId, total, tipo: 1, detalle }
-    const ventaItems = items.map(i => ({
-      id: 0, venta_control: control, articulo_codigo: i.articulo.codigo,
-      cantidad: i.cantidad, precio: i.precio, descuento: i.descuento, importe: i.importe,
-      articulos: { nombre: i.articulo.nombre, presentacion: i.articulo.presentacion ?? '' }
-    }))
-    generarRemitoPDF(venta, ventaItems, cliente)
+      if (errVenta || !ventaRow) {
+        throw new Error(errVenta?.message ?? 'No se pudo crear el remito.')
+      }
 
-    setGuardando(false)
-    router.push('/ventas')
+      ventaId = ventaRow.id
+
+      const { error: errItems } = await supabase.from('ventas_items').insert(
+        items.map(i => ({
+          venta_control: control,
+          articulo_codigo: i.articulo.codigo,
+          cantidad: i.cantidad,
+          precio: i.precio,
+          descuento: i.descuento,
+          importe: i.importe,
+        }))
+      )
+
+      if (errItems) {
+        throw new Error(errItems.message ?? 'No se pudieron guardar los ítems del remito.')
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      const usuarioId = user?.id ?? null
+
+      const detalleMovStock = `Remito #${String(control).padStart(6, '0')} - ${cliente.nombre}`
+      const detalleMovCuenta = `Remito #${String(control).padStart(6, '0')}`
+
+      for (const i of items) {
+        const { data: artRow, error: errArt } = await supabase
+          .from('articulos')
+          .select('id, stock')
+          .eq('id', i.articulo.id)
+          .single()
+
+        if (errArt || !artRow) {
+          throw new Error(`No se pudo leer stock del artículo "${i.articulo.nombre}".`)
+        }
+
+        const stockAnterior = Number(artRow.stock ?? 0)
+        const stockNuevo = stockAnterior - i.cantidad
+
+        if (stockNuevo < 0) {
+          stockWarnings.push(
+            `${i.articulo.nombre}: quedará en ${stockNuevo} unidades (stock previo ${stockAnterior}, vende ${i.cantidad}).`
+          )
+        }
+
+        const { error: errUpStock } = await supabase
+          .from('articulos')
+          .update({ stock: stockNuevo })
+          .eq('id', i.articulo.id)
+
+        if (errUpStock) {
+          throw new Error(errUpStock.message ?? `Error al actualizar stock de ${i.articulo.nombre}.`)
+        }
+
+        const { error: errMovStock } = await supabase.from('movimientos_stock').insert({
+          articulo_id: i.articulo.id,
+          tipo: 'salida',
+          cantidad: i.cantidad,
+          stock_anterior: stockAnterior,
+          stock_nuevo: stockNuevo,
+          referencia_tipo: 'remito',
+          referencia_id: ventaId,
+          detalle: detalleMovStock,
+          usuario_id: usuarioId,
+        })
+
+        if (errMovStock) {
+          throw new Error(errMovStock.message ?? 'Error al registrar movimiento de stock.')
+        }
+
+        stockRollback.push({ articuloId: i.articulo.id, cantidad: i.cantidad })
+      }
+
+      const { data: cliFresh, error: errCliRead } = await supabase
+        .from('clientes')
+        .select('id, saldo')
+        .eq('id', clienteId)
+        .single()
+
+      if (errCliRead || !cliFresh) {
+        throw new Error(errCliRead?.message ?? 'No se pudo leer el saldo del cliente.')
+      }
+
+      const saldoAnteriorCliente = Number(cliFresh.saldo ?? 0)
+      saldoClienteAntesRemito = saldoAnteriorCliente
+      const saldoNuevoCliente = saldoAnteriorCliente + total
+
+      const { error: errCliUp } = await supabase
+        .from('clientes')
+        .update({ saldo: saldoNuevoCliente })
+        .eq('id', clienteId)
+
+      if (errCliUp) {
+        throw new Error(errCliUp.message ?? 'No se pudo actualizar el saldo del cliente.')
+      }
+
+      const { error: errMovCuenta } = await supabase.from('movimientos_cuenta').insert({
+        cliente_id: clienteId,
+        tipo: 'cargo',
+        monto: total,
+        saldo_anterior: saldoAnteriorCliente,
+        saldo_nuevo: saldoNuevoCliente,
+        referencia_tipo: 'remito',
+        referencia_id: ventaId,
+        detalle: detalleMovCuenta,
+        usuario_id: usuarioId,
+      })
+
+      if (errMovCuenta) {
+        await supabase.from('clientes').update({ saldo: saldoAnteriorCliente }).eq('id', clienteId)
+        throw new Error(errMovCuenta.message ?? 'Error al registrar movimiento en cuenta corriente.')
+      }
+
+      const venta = { id: ventaId, control, fecha, cliente_id: clienteId, total, tipo: 1, detalle }
+      const ventaItems = items.map(i => ({
+        id: 0,
+        venta_control: control,
+        articulo_codigo: i.articulo.codigo,
+        cantidad: i.cantidad,
+        precio: i.precio,
+        descuento: i.descuento,
+        importe: i.importe,
+        articulos: { nombre: i.articulo.nombre, presentacion: i.articulo.presentacion ?? '' },
+      }))
+      try {
+        generarRemitoPDF(venta, ventaItems, cliente)
+      } catch {
+        /* PDF no debe deshacer el remito ya persistido */
+      }
+
+      if (stockWarnings.length > 0) {
+        toast.success('Remito guardado', {
+          description: `Stock negativo: ${stockWarnings.join(' · ')}`,
+          duration: 12000,
+        })
+      } else {
+        toast.success('Remito guardado correctamente.')
+      }
+
+      router.push('/ventas')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error desconocido al guardar el remito.'
+
+      if (ventaId !== null) {
+        for (const r of stockRollback) {
+          const { data: cur } = await supabase.from('articulos').select('stock').eq('id', r.articuloId).single()
+          const reverted = Number(cur?.stock ?? 0) + r.cantidad
+          await supabase.from('articulos').update({ stock: reverted }).eq('id', r.articuloId)
+        }
+        await supabase.from('movimientos_stock').delete().eq('referencia_id', ventaId).eq('referencia_tipo', 'remito')
+        await supabase.from('movimientos_cuenta').delete().eq('referencia_id', ventaId).eq('referencia_tipo', 'remito')
+        if (saldoClienteAntesRemito !== null) {
+          await supabase.from('clientes').update({ saldo: saldoClienteAntesRemito }).eq('id', clienteId)
+        }
+        await supabase.from('ventas_items').delete().eq('venta_control', control)
+        await supabase.from('ventas').delete().eq('id', ventaId)
+      }
+
+      const full = `${msg} No se aplicaron cambios de stock ni de cuenta corriente (se revirtió el remito si estaba creado).`
+      setErrorMsg(full)
+      toast.error(full)
+    } finally {
+      setGuardando(false)
+    }
   }
 
   const clienteSeleccionado = clientes.find(c => c.id === clienteId)
@@ -109,16 +284,20 @@ export default function NuevoRemitoPage() {
   return (
     <div className="max-w-4xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Nuevo remito</h1>
-        <p className="text-sm text-gray-500 mt-0.5">El PDF se generará automáticamente al guardar</p>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">Nuevo remito</h1>
+        <p className="mt-1 text-sm text-gray-600">El PDF se generará automáticamente al guardar</p>
+        {errorMsg && (
+          <div className="mt-4 text-sm text-red-700 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+            {errorMsg}
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-3 gap-5 mb-6">
-        {/* Cliente */}
-        <div className="col-span-2 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Cliente</label>
+      <div className="mb-6 grid grid-cols-1 gap-5 md:grid-cols-3">
+        <div className="rounded-2xl border border-gray-200/80 bg-white p-5 shadow-card md:col-span-2">
+          <label className="mb-3 block text-xs font-semibold uppercase tracking-wide text-gray-500">Cliente</label>
           <select value={clienteId ?? ''} onChange={e => setClienteId(Number(e.target.value))}
-            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white">
+            className="input-base bg-white">
             <option value="">— Seleccionar cliente —</option>
             {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
@@ -132,28 +311,28 @@ export default function NuevoRemitoPage() {
         </div>
 
         {/* Fecha y detalle */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+        <div className="rounded-2xl border border-gray-200/80 bg-white space-y-4 p-5 shadow-card md:col-span-1">
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Fecha</label>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">Fecha</label>
             <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+              className="input-base" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Detalle</label>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">Detalle</label>
             <input type="text" value={detalle} onChange={e => setDetalle(e.target.value)}
               placeholder="Opcional..."
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+              className="input-base" />
           </div>
         </div>
       </div>
 
       {/* Buscador de artículos */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 mb-5">
-        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Agregar artículo</label>
+      <div className="mb-5 rounded-2xl border border-gray-200/80 bg-white p-5 shadow-card">
+        <label className="mb-3 block text-xs font-semibold uppercase tracking-wide text-gray-500">Agregar artículo</label>
         <div className="relative">
           <input type="text" placeholder="Buscar por nombre o código..."
             value={busArt} onChange={e => setBusArt(e.target.value)}
-            className="w-full px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+            className="input-base" />
           {artSugs.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-100 rounded-xl shadow-lg z-10 overflow-hidden">
               {artSugs.map(a => (
@@ -171,19 +350,19 @@ export default function NuevoRemitoPage() {
 
       {/* Items */}
       {items.length > 0 && (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mb-5">
-          <table className="w-full text-sm">
+        <div className="table-wrap mb-5 overflow-hidden p-0">
+          <table className="table-data min-w-[720px]">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Artículo</th>
-                <th className="text-center px-3 py-3 text-xs font-semibold text-gray-500 uppercase">Cant.</th>
-                <th className="text-right px-3 py-3 text-xs font-semibold text-gray-500 uppercase">Precio</th>
-                <th className="text-center px-3 py-3 text-xs font-semibold text-gray-500 uppercase">Dto. %</th>
-                <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase">Importe</th>
-                <th className="px-3 py-3"></th>
+              <tr>
+                <th>Artículo</th>
+                <th className="text-center">Cant.</th>
+                <th className="text-right">Precio</th>
+                <th className="text-center">Dto. %</th>
+                <th className="text-right">Importe</th>
+                <th className="w-10"></th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody>
               {items.map((item, idx) => (
                 <tr key={idx}>
                   <td className="px-5 py-3">
@@ -208,9 +387,13 @@ export default function NuevoRemitoPage() {
                   <td className="px-5 py-3 text-right font-semibold text-gray-800">
                     ${item.importe.toFixed(2)}
                   </td>
-                  <td className="px-3 py-3 text-center">
-                    <button onClick={() => eliminarItem(idx)}
-                      className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                  <td className="text-center">
+                    <button type="button" onClick={() => eliminarItem(idx)}
+                      className="rounded-lg px-2 py-1 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 hover:text-red-700"
+                      aria-label="Quitar ítem"
+                    >
+                      ×
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -218,25 +401,26 @@ export default function NuevoRemitoPage() {
           </table>
 
           {/* Total */}
-          <div className="px-5 py-4 bg-brand-50 border-t border-brand-100 flex justify-end items-center gap-8">
-            <span className="text-sm font-medium text-brand-700">Total del remito</span>
-            <span className="text-2xl font-bold text-brand-800">
+          <div className="flex items-center justify-end gap-8 border-t border-brand-100 bg-brand-50/80 px-5 py-4">
+            <span className="text-sm font-medium text-brand-800">Total del remito</span>
+            <span className="text-2xl font-bold tabular-nums text-brand-900">
               ${total.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
       )}
 
-      {/* Botones */}
-      <div className="flex justify-end gap-3">
-        <a href="/ventas"
-          className="px-5 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+      <div className="flex flex-wrap justify-end gap-3">
+        <a href="/ventas" className="btn-secondary">
           Cancelar
         </a>
-        <button onClick={guardar}
+        <button
+          type="button"
+          onClick={guardar}
           disabled={guardando || !clienteId || items.length === 0}
-          className="px-6 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-          {guardando ? 'Guardando...' : '💾 Guardar y generar PDF'}
+          className="btn-primary disabled:pointer-events-none disabled:opacity-50"
+        >
+          {guardando ? 'Guardando…' : 'Guardar y generar PDF'}
         </button>
       </div>
     </div>

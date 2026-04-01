@@ -52,3 +52,41 @@ export type VentaItem = {
   importe: number
   articulos?: { nombre: string; presentacion: string }
 }
+
+export type MovimientoStock = {
+  id: number
+  articulo_id: number
+  tipo: string
+  cantidad: number
+  stock_anterior: number
+  stock_nuevo: number
+  referencia_tipo: string | null
+  referencia_id: number | null
+  detalle: string | null
+  usuario_id: string | null
+  created_at: string
+}
+
+export type MovimientoCuenta = {
+  id: number
+  cliente_id: number
+  tipo: string
+  monto: number
+  saldo_anterior: number
+  saldo_nuevo: number
+  referencia_tipo: string | null
+  referencia_id: number | null
+  detalle: string | null
+  usuario_id: string | null
+  created_at: string
+}
+
+export type Pago = {
+  id: number
+  cliente_id: number
+  monto: number
+  metodo_pago: string
+  detalle: string | null
+  usuario_id: string | null
+  created_at: string
+}

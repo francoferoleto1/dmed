@@ -9,19 +9,69 @@
   --font-mono: 'DM Mono', monospace;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
 body {
   font-family: var(--font-sans);
-  background: #f8faf9;
-  color: #1a1a1a;
+  background: #f3f4f6;
+  color: #111827;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: #f0f9f4; }
-::-webkit-scrollbar-thumb { background: #8acdb0; border-radius: 3px; }
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f3f4f6;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
 
-/* Transitions */
-a, button { transition: all 0.15s ease; }
+@layer components {
+  .input-base {
+    @apply w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-900 bg-white
+      transition-shadow duration-200
+      focus:outline-none focus:ring-2 focus:ring-brand-500/30 focus:border-brand-500;
+  }
+  .input-error {
+    @apply border-red-400 focus:ring-red-200 focus:border-red-500;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-semibold text-white
+      shadow-sm transition-all duration-200
+      hover:bg-brand-700 hover:shadow-md active:scale-[0.98]
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-medium text-gray-700
+      transition-all duration-200 hover:bg-gray-50 hover:border-gray-300 active:scale-[0.98];
+  }
+  .table-wrap {
+    @apply overflow-x-auto rounded-2xl border border-gray-200/80 bg-white shadow-card;
+  }
+  .table-data {
+    @apply w-full min-w-[640px] text-sm;
+  }
+  .table-data thead tr {
+    @apply border-b border-gray-100 bg-gray-50/95;
+  }
+  .table-data th {
+    @apply px-4 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 first:pl-5 last:pr-5 sm:first:pl-6 sm:last:pr-6;
+  }
+  .table-data tbody tr {
+    @apply border-b border-gray-50 transition-colors duration-150 last:border-0 hover:bg-gray-50/90;
+  }
+  .table-data td {
+    @apply px-4 py-3.5 text-gray-800 first:pl-5 last:pr-5 sm:first:pl-6 sm:last:pr-6;
+  }
+}

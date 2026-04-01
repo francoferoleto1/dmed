@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { createServerSupabase } from "@/lib/server"
+import MainContent from "@/components/MainContent"
 import Sidebar from "@/components/Sidebar"
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -10,9 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 ml-56 p-8 min-h-screen">
-        {children}
-      </main>
+      <MainContent>{children}</MainContent>
     </div>
   )
 }

@@ -1,6 +1,12 @@
 'use client'
 export const dynamic = 'force-dynamic'
+
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
+import { toast } from 'sonner'
+import Modal from '@/components/ui/Modal'
+import TableSkeleton from '@/components/ui/TableSkeleton'
 import { createClient, Cliente } from '@/lib/supabase'
 
 export default function ClientesPage() {
@@ -10,6 +16,7 @@ export default function ClientesPage() {
   const [modal, setModal] = useState<Cliente | null>(null)
   const [form, setForm] = useState<Partial<Cliente>>({})
   const [guardando, setGuardando] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({})
   const supabase = createClient()
 
   const cargar = async () => {
@@ -19,130 +26,189 @@ export default function ClientesPage() {
     setLoading(false)
   }
 
-  useEffect(() => { cargar() }, [])
+  useEffect(() => {
+    cargar()
+  }, [])
 
-  const filtrados = clientes.filter(c =>
-    c.nombre.toLowerCase().includes(busqueda.toLowerCase()) ||
-    (c.cuit ?? '').includes(busqueda)
+  const filtrados = clientes.filter(
+    c =>
+      c.nombre.toLowerCase().includes(busqueda.toLowerCase()) || (c.cuit ?? '').includes(busqueda)
   )
 
   const abrirNuevo = () => {
+    setFieldErrors({})
     setForm({ condicion_pago: 'CONTADO', condicion_iva: 1, saldo: 0, descuento: 0 })
     setModal({} as Cliente)
   }
 
-  const abrirEditar = (c: Cliente) => { setForm(c); setModal(c) }
-
-  const guardar = async () => {
-    setGuardando(true)
-    if (modal?.id) {
-      await supabase.from('clientes').update(form).eq('id', modal.id)
-    } else {
-      const maxCod = clientes.reduce((m, c) => Math.max(m, c.codigo), 0)
-      await supabase.from('clientes').insert({ ...form, codigo: maxCod + 1 })
-    }
-    setGuardando(false)
-    setModal(null)
-    cargar()
+  const abrirEditar = (c: Cliente) => {
+    setFieldErrors({})
+    setForm(c)
+    setModal(c)
   }
 
-  const f = (k: keyof Cliente) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(prev => ({ ...prev, [k]: e.target.value }))
+  const guardar = async () => {
+    const nombreOk = !!(form.nombre ?? '').trim()
+    setFieldErrors({ nombre: !nombreOk })
+    if (!nombreOk) {
+      toast.error('El nombre es obligatorio.')
+      return
+    }
+
+    setGuardando(true)
+    try {
+      if (modal?.id) {
+        const { error } = await supabase.from('clientes').update(form).eq('id', modal.id)
+        if (error) throw error
+        toast.success('Cliente actualizado.')
+      } else {
+        const maxCod = clientes.reduce((m, c) => Math.max(m, c.codigo), 0)
+        const { error } = await supabase.from('clientes').insert({ ...form, codigo: maxCod + 1 })
+        if (error) throw error
+        toast.success('Cliente creado.')
+      }
+      setModal(null)
+      cargar()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo guardar.')
+    } finally {
+      setGuardando(false)
+    }
+  }
+
+  const f =
+    (k: keyof Cliente) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+      setFieldErrors(prev => ({ ...prev, [k]: false }))
+      setForm(prev => ({ ...prev, [k]: e.target.value }))
+    }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Clientes</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{clientes.length} clientes registrados</p>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">Clientes</h1>
+          <p className="mt-1 text-sm text-gray-600">{clientes.length} clientes registrados</p>
         </div>
-        <button onClick={abrirNuevo}
-          className="bg-brand-600 hover:bg-brand-700 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors">
-          + Nuevo cliente
+        <button type="button" onClick={abrirNuevo} className="btn-primary w-full sm:w-auto">
+          <Plus className="h-4 w-4" />
+          Nuevo cliente
         </button>
       </div>
 
-      {/* Búsqueda */}
       <div className="mb-5">
-        <input type="text" placeholder="Buscar por nombre o CUIT..."
-          value={busqueda} onChange={e => setBusqueda(e.target.value)}
-          className="w-full max-w-sm px-4 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+        <label htmlFor="buscar-clientes" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Buscar
+        </label>
+        <input
+          id="buscar-clientes"
+          type="text"
+          placeholder="Nombre o CUIT..."
+          value={busqueda}
+          onChange={e => setBusqueda(e.target.value)}
+          className="input-base max-w-md"
+        />
       </div>
 
-      {/* Tabla */}
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="table-wrap">
+        <table className="table-data">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nombre</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">CUIT</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Condición</th>
-              <th className="text-right px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Saldo</th>
-              <th className="px-5 py-3"></th>
+            <tr>
+              <th>Nombre</th>
+              <th>CUIT</th>
+              <th>Condición</th>
+              <th className="text-right">Saldo</th>
+              <th className="text-right w-32">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
-            {loading ? (
-              <tr><td colSpan={5} className="text-center py-12 text-gray-400">Cargando...</td></tr>
-            ) : filtrados.length === 0 ? (
-              <tr><td colSpan={5} className="text-center py-12 text-gray-400">Sin resultados</td></tr>
-            ) : filtrados.map(c => (
-              <tr key={c.id} className="hover:bg-gray-50 transition-colors">
-                <td className="px-5 py-3.5 font-medium text-gray-800">{c.nombre}</td>
-                <td className="px-5 py-3.5 text-gray-500 font-mono text-xs">{c.cuit?.trim() || '—'}</td>
-                <td className="px-5 py-3.5 text-gray-500">{c.condicion_pago ?? '—'}</td>
-                <td className={`px-5 py-3.5 text-right font-semibold ${(c.saldo ?? 0) > 0 ? 'text-red-600' : 'text-gray-700'}`}>
-                  ${Number(c.saldo ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                </td>
-                <td className="px-5 py-3.5 text-right">
-                  <button onClick={() => abrirEditar(c)}
-                    className="text-brand-600 hover:text-brand-800 font-medium text-xs">
-                    Editar
-                  </button>
+          {loading ? (
+            <TableSkeleton rows={7} cols={5} />
+          ) : filtrados.length === 0 ? (
+            <tbody>
+              <tr>
+                <td colSpan={5} className="py-14 text-center text-gray-500">
+                  Sin resultados
                 </td>
               </tr>
-            ))}
-          </tbody>
+            </tbody>
+          ) : (
+            <tbody>
+              {filtrados.map(c => (
+                <tr key={c.id}>
+                  <td className="font-medium">{c.nombre}</td>
+                  <td className="font-mono text-xs text-gray-600">{c.cuit?.trim() || '—'}</td>
+                  <td className="text-gray-600">{c.condicion_pago ?? '—'}</td>
+                  <td
+                    className={`text-right font-semibold tabular-nums ${
+                      (c.saldo ?? 0) > 0 ? 'text-red-600' : 'text-gray-800'
+                    }`}
+                  >
+                    ${Number(c.saldo ?? 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="text-right">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Link
+                        href={`/clientes/${c.id}/cuenta`}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                      >
+                        Cuenta
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => abrirEditar(c)}
+                        className="rounded-lg px-2 py-1 text-xs font-medium text-brand-600 transition-colors hover:bg-brand-50"
+                      >
+                        Editar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
         </table>
       </div>
 
-      {/* Modal */}
-      {modal !== null && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-5">
-              {modal.id ? 'Editar cliente' : 'Nuevo cliente'}
-            </h2>
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                { label: 'Nombre', key: 'nombre', col: 2 },
-                { label: 'Dirección', key: 'direccion', col: 2 },
-                { label: 'Localidad', key: 'localidad', col: 1 },
-                { label: 'CUIT', key: 'cuit', col: 1 },
-                { label: 'Condición de pago', key: 'condicion_pago', col: 1 },
-                { label: 'Descuento %', key: 'descuento', col: 1 },
-              ].map(({ label, key, col }) => (
-                <div key={key} className={col === 2 ? 'col-span-2' : ''}>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-                  <input type="text" value={(form as any)[key] ?? ''}
-                    onChange={f(key as keyof Cliente)}
-                    className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button onClick={() => setModal(null)}
-                className="px-5 py-2 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
-                Cancelar
-              </button>
-              <button onClick={guardar} disabled={guardando}
-                className="px-5 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold disabled:opacity-60">
-                {guardando ? 'Guardando...' : 'Guardar'}
-              </button>
-            </div>
+      <Modal
+        open={modal !== null}
+        onClose={() => setModal(null)}
+        title={modal?.id ? 'Editar cliente' : 'Nuevo cliente'}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-3">
+            <button type="button" className="btn-secondary" onClick={() => setModal(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="btn-primary" onClick={guardar} disabled={guardando}>
+              {guardando ? 'Guardando…' : 'Guardar'}
+            </button>
           </div>
+        }
+      >
+        <div className="grid grid-cols-2 gap-4">
+          {[
+            { label: 'Nombre', key: 'nombre' as const, col: 2, required: true },
+            { label: 'Dirección', key: 'direccion' as const, col: 2 },
+            { label: 'Localidad', key: 'localidad' as const, col: 1 },
+            { label: 'CUIT', key: 'cuit' as const, col: 1 },
+            { label: 'Condición de pago', key: 'condicion_pago' as const, col: 1 },
+            { label: 'Descuento %', key: 'descuento' as const, col: 1 },
+          ].map(({ label, key, col, required }) => (
+            <div key={key} className={col === 2 ? 'col-span-2' : ''}>
+              <label className="mb-1.5 block text-xs font-semibold text-gray-600">{label}</label>
+              <input
+                type="text"
+                value={(form as any)[key] ?? ''}
+                onChange={f(key)}
+                className={`input-base ${fieldErrors[key] ? 'input-error' : ''}`}
+                aria-invalid={fieldErrors[key]}
+              />
+              {required && fieldErrors[key] && (
+                <p className="mt-1 text-xs text-red-600">Requerido</p>
+              )}
+            </div>
+          ))}
         </div>
-      )}
+      </Modal>
     </div>
   )
 }
