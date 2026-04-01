@@ -2,15 +2,19 @@
 export const dynamic = 'force-dynamic'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import Modal from '@/components/ui/Modal'
 import TableSkeleton from '@/components/ui/TableSkeleton'
 import { createClient, Articulo } from '@/lib/supabase'
-import { stockAmountClass } from '@/lib/stock'
+import { stockPillClass, STOCK_LOW_THRESHOLD } from '@/lib/stock'
 
-export default function ArticulosPage() {
+function ArticulosPageContent() {
+  const searchParams = useSearchParams()
+  const filtroStockBajo = searchParams.get('stockBajo') === '1'
+
   const [articulos, setArticulos] = useState<Articulo[]>([])
   const [busqueda, setBusqueda] = useState('')
   const [laboratorioFiltro, setLaboratorioFiltro] = useState('')
@@ -33,6 +37,10 @@ export default function ArticulosPage() {
     cargar()
   }, [])
 
+  useEffect(() => {
+    if (filtroStockBajo) setSoloActivos(true)
+  }, [filtroStockBajo])
+
   const laboratoriosUnicos = useMemo(() => {
     const set = new Set<string>()
     for (const a of articulos) {
@@ -42,23 +50,30 @@ export default function ArticulosPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }))
   }, [articulos])
 
+  // Filtros combinados: búsqueda (todos los campos) + laboratorio + solo activos.
   const filtrados = useMemo(() => {
     const q = busqueda.trim().toLowerCase()
     return articulos.filter(a => {
-      if (soloActivos && a.descontinuado) return false
+      if (filtroStockBajo) {
+        if (a.descontinuado) return false
+        if (Number(a.stock) >= STOCK_LOW_THRESHOLD) return false
+      }
       if (laboratorioFiltro) {
         const lab = (a.laboratorio ?? '').trim()
         if (lab !== laboratorioFiltro) return false
       }
+      if (soloActivos && a.descontinuado) return false
       if (!q) return true
-      const codigoNorm = String(a.codigo ?? '').toLowerCase()
+      const codigoNorm = String(a.codigo ?? '').trim().toLowerCase()
+      const nombreNorm = (a.nombre ?? '').toLowerCase()
+      const labNorm = (a.laboratorio ?? '').toLowerCase()
       return (
-        a.nombre.toLowerCase().includes(q) ||
+        nombreNorm.includes(q) ||
         codigoNorm.includes(q) ||
-        (a.laboratorio ?? '').toLowerCase().includes(q)
+        labNorm.includes(q)
       )
     })
-  }, [articulos, busqueda, soloActivos, laboratorioFiltro])
+  }, [articulos, busqueda, soloActivos, laboratorioFiltro, filtroStockBajo])
 
   const abrirNuevo = () => {
     setFieldErrors({})
@@ -114,7 +129,11 @@ export default function ArticulosPage() {
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">Artículos</h1>
-          <p className="mt-1 text-sm text-gray-600">{filtrados.length} artículos mostrados</p>
+          <p className="mt-1 text-sm text-gray-600">
+            Mostrando{' '}
+            <span className="font-semibold text-gray-900">{filtrados.length}</span> de{' '}
+            <span className="font-semibold text-gray-900">{articulos.length}</span> artículos
+          </p>
         </div>
         <button type="button" onClick={abrirNuevo} className="btn-primary w-full sm:w-auto">
           <Plus className="h-4 w-4" />
@@ -122,27 +141,27 @@ export default function ArticulosPage() {
         </button>
       </div>
 
-      <div className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-card">
-        <div className="min-w-[12rem] flex-1">
+      <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-card md:flex-row md:items-end md:gap-4">
+        <div className="min-w-0 w-full flex-[2]">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
             Buscar
           </label>
           <input
             type="text"
-            placeholder="Nombre, código o laboratorio..."
+            placeholder="Buscar por nombre, código o laboratorio..."
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
-            className="input-base"
+            className="input-base w-full"
           />
         </div>
-        <div className="min-w-[13rem]">
+        <div className="w-full min-w-[13rem] md:w-56 md:flex-shrink-0">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
             Laboratorio
           </label>
           <select
             value={laboratorioFiltro}
             onChange={e => setLaboratorioFiltro(e.target.value)}
-            className="input-base"
+            className="input-base w-full bg-white"
             aria-label="Filtrar por laboratorio"
           >
             <option value="">Todos los laboratorios</option>
@@ -153,7 +172,7 @@ export default function ArticulosPage() {
             ))}
           </select>
         </div>
-        <label className="flex cursor-pointer items-center gap-2 pb-2 text-sm text-gray-700 select-none">
+        <label className="flex cursor-pointer items-center gap-2 pb-0.5 text-sm text-gray-700 select-none md:flex-shrink-0 md:pb-2">
           <input
             type="checkbox"
             checked={soloActivos}
@@ -163,6 +182,15 @@ export default function ArticulosPage() {
           Solo activos
         </label>
       </div>
+
+      {filtroStockBajo && (
+        <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+          Mostrando artículos activos con stock menor a {STOCK_LOW_THRESHOLD} unidades.{' '}
+          <Link href="/articulos" className="font-semibold text-brand-700 underline underline-offset-2">
+            Quitar filtro
+          </Link>
+        </div>
+      )}
 
       <div className="table-wrap">
         <table className="table-data min-w-[900px]">
@@ -192,9 +220,7 @@ export default function ArticulosPage() {
               {filtrados.map(a => (
                 <tr
                   key={a.id}
-                  className={
-                    a.descontinuado ? 'bg-gray-50/70 opacity-[0.92]' : ''
-                  }
+                  className={a.descontinuado ? 'bg-gray-50/80 opacity-[0.65]' : ''}
                 >
                   <td className="font-mono text-xs text-gray-600">{a.codigo}</td>
                   <td className="font-medium">
@@ -212,14 +238,21 @@ export default function ArticulosPage() {
                   <td className="text-right font-semibold tabular-nums">
                     ${Number(a.precio).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                   </td>
-                  <td className={`text-right ${stockAmountClass(a.stock)}`}>{a.stock}</td>
+                  <td className="text-right">
+                    <span className={stockPillClass(Number(a.stock))}>
+                      {Number(a.stock).toLocaleString('es-AR', {
+                        minimumFractionDigits: 0,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </td>
                   <td className="text-right">
                     <div className="flex flex-wrap justify-end gap-2">
                       <Link
                         href={`/articulos/${a.id}/movimientos`}
                         className="rounded-lg px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
                       >
-                        Movimientos
+                        📋 Movimientos
                       </Link>
                       <button
                         type="button"
@@ -294,5 +327,17 @@ export default function ArticulosPage() {
         </div>
       </Modal>
     </div>
+  )
+}
+
+export default function ArticulosPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="py-16 text-center text-gray-500 text-sm">Cargando artículos…</div>
+      }
+    >
+      <ArticulosPageContent />
+    </Suspense>
   )
 }

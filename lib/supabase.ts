@@ -56,6 +56,7 @@ export type VentaItem = {
 export type MovimientoStock = {
   id: number
   articulo_id: number
+  articulo_codigo?: string | null
   tipo: string
   cantidad: number
   stock_anterior: number
@@ -63,7 +64,6 @@ export type MovimientoStock = {
   referencia_tipo: string | null
   referencia_id: number | null
   detalle: string | null
-  usuario_id: string | null
   created_at: string
 }
 
@@ -77,7 +77,6 @@ export type MovimientoCuenta = {
   referencia_tipo: string | null
   referencia_id: number | null
   detalle: string | null
-  usuario_id: string | null
   created_at: string
 }
 
@@ -87,6 +86,5 @@ export type Pago = {
   monto: number
   metodo_pago: string
   detalle: string | null
-  usuario_id: string | null
   created_at: string
 }

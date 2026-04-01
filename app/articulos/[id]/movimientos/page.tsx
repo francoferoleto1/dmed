@@ -107,18 +107,30 @@ export default function ArticuloMovimientosPage() {
           <Link href="/articulos" className="text-sm text-brand-600 hover:text-brand-700 font-medium">
             ← Artículos
           </Link>
-          <h1 className="text-2xl font-bold text-gray-900 mt-2">
-            Movimientos de stock
-          </h1>
           {articulo ? (
-            <p className="text-sm text-gray-500 mt-1">
-              <span className="font-mono text-xs text-gray-400">{articulo.codigo}</span>
-              {' · '}
-              <span className="font-medium text-gray-800">{articulo.nombre}</span>
-              {articulo.presentacion ? ` · ${articulo.presentacion}` : ''}
-            </p>
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mt-2">
+                Movimientos de stock - {articulo.nombre}{' '}
+                <span className="font-mono text-lg font-semibold text-gray-600">({articulo.codigo})</span>
+              </h1>
+              <p className="mt-3 inline-flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50/80 px-4 py-2 text-sm">
+                <span className="font-semibold text-emerald-900">Stock actual</span>
+                <span className="tabular-nums font-bold text-emerald-800">
+                  {Number(articulo.stock ?? 0).toLocaleString('es-AR', {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </p>
+              {articulo.presentacion ? (
+                <p className="text-sm text-gray-500 mt-2">{articulo.presentacion}</p>
+              ) : null}
+            </>
           ) : (
-            <p className="text-sm text-gray-400 mt-1">Cargando artículo…</p>
+            <>
+              <h1 className="text-2xl font-bold text-gray-900 mt-2">Movimientos de stock</h1>
+              <p className="text-sm text-gray-400 mt-1">Cargando artículo…</p>
+            </>
           )}
         </div>
       </div>
@@ -160,27 +172,30 @@ export default function ArticuloMovimientosPage() {
 
       <div className="table-wrap">
         <div className="overflow-x-auto">
-          <table className="table-data min-w-[720px]">
+          <table className="table-data min-w-[900px]">
             <thead>
               <tr>
                 <th>Fecha</th>
                 <th>Tipo</th>
                 <th className="text-right">Cantidad</th>
-                <th>Stock</th>
+                <th className="text-right">Stock anterior</th>
+                <th className="text-right">Stock nuevo</th>
                 <th>Detalle</th>
-                <th>Ref.</th>
+                <th>Referencia</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-500">
+                  <td colSpan={7} className="py-12 text-center text-gray-500">
                     <span className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600" />
                   </td>
                 </tr>
               ) : movs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-14 text-center text-gray-500">Sin movimientos</td>
+                  <td colSpan={7} className="py-14 text-center text-gray-500">
+                    No hay movimientos registrados
+                  </td>
                 </tr>
               ) : (
                 movs.map(m => (
@@ -199,15 +214,14 @@ export default function ArticuloMovimientosPage() {
                       </span>
                     </td>
                     <td className="text-right font-mono tabular-nums">{m.cantidad}</td>
-                    <td className="tabular-nums text-gray-700">
-                      {m.stock_anterior} → {m.stock_nuevo}
-                    </td>
+                    <td className="text-right tabular-nums text-gray-700">{m.stock_anterior}</td>
+                    <td className="text-right tabular-nums text-gray-700">{m.stock_nuevo}</td>
                     <td className="max-w-[220px] truncate text-gray-600" title={m.detalle ?? ''}>
                       {m.detalle ?? '—'}
                     </td>
-                    <td className="text-xs text-gray-500">
+                    <td className="text-xs text-gray-600">
                       {m.referencia_tipo ?? '—'}
-                      {m.referencia_id != null ? ` #${m.referencia_id}` : ''}
+                      {m.referencia_id != null ? ` · ${m.referencia_id}` : ''}
                     </td>
                   </tr>
                 ))

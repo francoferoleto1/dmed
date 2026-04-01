@@ -117,7 +117,7 @@ export default function ClientesPage() {
               <th>CUIT</th>
               <th>Condición</th>
               <th className="text-right">Saldo</th>
-              <th className="text-right w-32">Acciones</th>
+              <th className="text-right w-44">Acciones</th>
             </tr>
           </thead>
           {loading ? (
@@ -150,7 +150,7 @@ export default function ClientesPage() {
                         href={`/clientes/${c.id}/cuenta`}
                         className="rounded-lg px-2 py-1 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
                       >
-                        Cuenta
+                        💰 Cuenta corriente
                       </Link>
                       <button
                         type="button"

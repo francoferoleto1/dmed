@@ -85,14 +85,10 @@ export default function NuevoRemitoPage() {
       return
     }
 
-    const stockWarnings: string[] = []
-    const stockRollback: { articuloId: number; cantidad: number }[] = []
-
     const { data: maxData } = await supabase.from('ventas').select('control').order('control', { ascending: false }).limit(1)
     const control = ((maxData?.[0]?.control) ?? 0) + 1
 
     let ventaId: number | null = null
-    let saldoClienteAntesRemito: number | null = null
 
     try {
       const { data: ventaRow, error: errVenta } = await supabase
@@ -127,65 +123,79 @@ export default function NuevoRemitoPage() {
       )
 
       if (errItems) {
+        await supabase.from('ventas').delete().eq('id', ventaId)
         throw new Error(errItems.message ?? 'No se pudieron guardar los ítems del remito.')
       }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error desconocido al guardar el remito.'
+      setErrorMsg(msg)
+      toast.error(msg)
+      setGuardando(false)
+      return
+    }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      const usuarioId = user?.id ?? null
+    const detalleMovStock = `Remito #${control} - ${cliente.nombre}`
+    const detalleMovCuenta = `Remito #${control}`
 
-      const detalleMovStock = `Remito #${String(control).padStart(6, '0')} - ${cliente.nombre}`
-      const detalleMovCuenta = `Remito #${String(control).padStart(6, '0')}`
+    let stockPostError = false
 
-      for (const i of items) {
+    for (const i of items) {
+      try {
         const { data: artRow, error: errArt } = await supabase
           .from('articulos')
           .select('id, stock')
-          .eq('id', i.articulo.id)
+          .eq('codigo', i.articulo.codigo)
           .single()
 
         if (errArt || !artRow) {
-          throw new Error(`No se pudo leer stock del artículo "${i.articulo.nombre}".`)
+          console.error('Remito: no se pudo leer artículo por código', i.articulo.codigo, errArt)
+          stockPostError = true
+          continue
         }
 
         const stockAnterior = Number(artRow.stock ?? 0)
         const stockNuevo = stockAnterior - i.cantidad
 
         if (stockNuevo < 0) {
-          stockWarnings.push(
-            `${i.articulo.nombre}: quedará en ${stockNuevo} unidades (stock previo ${stockAnterior}, vende ${i.cantidad}).`
-          )
+          toast.warning(`Stock negativo para ${i.articulo.nombre}`)
         }
 
         const { error: errUpStock } = await supabase
           .from('articulos')
           .update({ stock: stockNuevo })
-          .eq('id', i.articulo.id)
+          .eq('codigo', i.articulo.codigo)
 
         if (errUpStock) {
-          throw new Error(errUpStock.message ?? `Error al actualizar stock de ${i.articulo.nombre}.`)
+          console.error('Remito: error al actualizar stock', errUpStock)
+          stockPostError = true
+          continue
         }
 
         const { error: errMovStock } = await supabase.from('movimientos_stock').insert({
-          articulo_id: i.articulo.id,
+          articulo_id: artRow.id,
+          articulo_codigo: i.articulo.codigo,
           tipo: 'salida',
           cantidad: i.cantidad,
           stock_anterior: stockAnterior,
           stock_nuevo: stockNuevo,
           referencia_tipo: 'remito',
-          referencia_id: ventaId,
+          referencia_id: control,
           detalle: detalleMovStock,
-          usuario_id: usuarioId,
         })
 
         if (errMovStock) {
-          throw new Error(errMovStock.message ?? 'Error al registrar movimiento de stock.')
+          console.error('Remito: error movimiento_stock', errMovStock)
+          stockPostError = true
         }
-
-        stockRollback.push({ articuloId: i.articulo.id, cantidad: i.cantidad })
+      } catch (e) {
+        console.error('Remito: error en post-proceso de stock', e)
+        stockPostError = true
       }
+    }
 
+    let saldoPostError = false
+
+    try {
       const { data: cliFresh, error: errCliRead } = await supabase
         .from('clientes')
         .select('id, saldo')
@@ -197,7 +207,6 @@ export default function NuevoRemitoPage() {
       }
 
       const saldoAnteriorCliente = Number(cliFresh.saldo ?? 0)
-      saldoClienteAntesRemito = saldoAnteriorCliente
       const saldoNuevoCliente = saldoAnteriorCliente + total
 
       const { error: errCliUp } = await supabase
@@ -216,67 +225,49 @@ export default function NuevoRemitoPage() {
         saldo_anterior: saldoAnteriorCliente,
         saldo_nuevo: saldoNuevoCliente,
         referencia_tipo: 'remito',
-        referencia_id: ventaId,
+        referencia_id: control,
         detalle: detalleMovCuenta,
-        usuario_id: usuarioId,
       })
 
       if (errMovCuenta) {
         await supabase.from('clientes').update({ saldo: saldoAnteriorCliente }).eq('id', clienteId)
         throw new Error(errMovCuenta.message ?? 'Error al registrar movimiento en cuenta corriente.')
       }
-
-      const venta = { id: ventaId, control, fecha, cliente_id: clienteId, total, tipo: 1, detalle }
-      const ventaItems = items.map(i => ({
-        id: 0,
-        venta_control: control,
-        articulo_codigo: i.articulo.codigo,
-        cantidad: i.cantidad,
-        precio: i.precio,
-        descuento: i.descuento,
-        importe: i.importe,
-        articulos: { nombre: i.articulo.nombre, presentacion: i.articulo.presentacion ?? '' },
-      }))
-      try {
-        generarRemitoPDF(venta, ventaItems, cliente)
-      } catch {
-        /* PDF no debe deshacer el remito ya persistido */
-      }
-
-      if (stockWarnings.length > 0) {
-        toast.success('Remito guardado', {
-          description: `Stock negativo: ${stockWarnings.join(' · ')}`,
-          duration: 12000,
-        })
-      } else {
-        toast.success('Remito guardado correctamente.')
-      }
-
-      router.push('/ventas')
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Error desconocido al guardar el remito.'
-
-      if (ventaId !== null) {
-        for (const r of stockRollback) {
-          const { data: cur } = await supabase.from('articulos').select('stock').eq('id', r.articuloId).single()
-          const reverted = Number(cur?.stock ?? 0) + r.cantidad
-          await supabase.from('articulos').update({ stock: reverted }).eq('id', r.articuloId)
-        }
-        await supabase.from('movimientos_stock').delete().eq('referencia_id', ventaId).eq('referencia_tipo', 'remito')
-        await supabase.from('movimientos_cuenta').delete().eq('referencia_id', ventaId).eq('referencia_tipo', 'remito')
-        if (saldoClienteAntesRemito !== null) {
-          await supabase.from('clientes').update({ saldo: saldoClienteAntesRemito }).eq('id', clienteId)
-        }
-        await supabase.from('ventas_items').delete().eq('venta_control', control)
-        await supabase.from('ventas').delete().eq('id', ventaId)
-      }
-
-      const full = `${msg} No se aplicaron cambios de stock ni de cuenta corriente (se revirtió el remito si estaba creado).`
-      setErrorMsg(full)
-      toast.error(full)
-    } finally {
-      setGuardando(false)
+      console.error('Remito: error en cargo de cuenta corriente', e)
+      saldoPostError = true
     }
+
+    const venta = { id: ventaId!, control, fecha, cliente_id: clienteId, total, tipo: 1, detalle }
+    const ventaItems = items.map(i => ({
+      id: 0,
+      venta_control: control,
+      articulo_codigo: i.articulo.codigo,
+      cantidad: i.cantidad,
+      precio: i.precio,
+      descuento: i.descuento,
+      importe: i.importe,
+      articulos: { nombre: i.articulo.nombre, presentacion: i.articulo.presentacion ?? '' },
+    }))
+    try {
+      generarRemitoPDF(venta, ventaItems, cliente)
+    } catch {
+      /* PDF no debe deshacer el remito ya persistido */
+    }
+
+    const partes: string[] = []
+    if (stockPostError) partes.push('stock')
+    if (saldoPostError) partes.push('saldo')
+    if (partes.length > 0) {
+      toast.error(
+        `Remito guardado pero hubo un error actualizando ${partes.join(' y ')}. Contacte al administrador.`
+      )
+    } else {
+      toast.success('Remito guardado correctamente.')
+    }
+
+    router.push('/ventas')
+    setGuardando(false)
   }
 
   const clienteSeleccionado = clientes.find(c => c.id === clienteId)

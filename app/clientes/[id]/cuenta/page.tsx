@@ -23,6 +23,9 @@ function badgeTipo(tipo: string) {
   if (t === 'ajuste') {
     return 'bg-amber-50 text-amber-900 border-amber-100'
   }
+  if (t === 'nota_credito') {
+    return 'bg-blue-50 text-blue-800 border-blue-100'
+  }
   return 'bg-gray-50 text-gray-700 border-gray-100'
 }
 
@@ -124,12 +127,16 @@ export default function ClienteCuentaPage() {
     setGuardandoPago(true)
     setErrorPago('')
 
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      const usuarioId = user?.id ?? null
+    const metodoLabels: Record<string, string> = {
+      efectivo: 'Efectivo',
+      transferencia: 'Transferencia',
+      cheque: 'Cheque',
+    }
+    const metodoLabel = metodoLabels[metodoPago] ?? metodoPago
+    const extra = detallePago.trim()
+    const detalleMovPago = extra ? `Pago ${metodoLabel} - ${extra}` : `Pago ${metodoLabel}`
 
+    try {
       const { data: pagoRow, error: errPago } = await supabase
         .from('pagos')
         .insert({
@@ -137,7 +144,6 @@ export default function ClienteCuentaPage() {
           monto,
           metodo_pago: metodoPago,
           detalle: detallePago.trim() || null,
-          usuario_id: usuarioId,
         })
         .select('id')
         .single()
@@ -164,8 +170,7 @@ export default function ClienteCuentaPage() {
         saldo_nuevo: saldoNuevo,
         referencia_tipo: 'pago',
         referencia_id: pagoRow.id,
-        detalle: detallePago.trim() || `Pago ${metodoPago}`,
-        usuario_id: usuarioId,
+        detalle: detalleMovPago,
       })
 
       if (errMov) {
@@ -178,7 +183,7 @@ export default function ClienteCuentaPage() {
       setMontoPago('')
       setDetallePago('')
       setMetodoPago('efectivo')
-      toast.success('Pago registrado.')
+      toast.success('Pago registrado correctamente')
       await cargarCliente()
       await cargarMovs()
     } catch (e) {
@@ -209,7 +214,18 @@ export default function ClienteCuentaPage() {
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Cuenta corriente</h1>
             {cliente ? (
-              <p className="text-sm font-medium text-gray-800 mt-1">{cliente.nombre}</p>
+              <>
+                <p className="text-sm font-medium text-gray-800 mt-1">{cliente.nombre}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Código <span className="font-mono font-semibold text-gray-700">{cliente.codigo}</span>
+                  {cliente.condicion_pago ? (
+                    <>
+                      {' · '}
+                      <span className="text-gray-600">Condición: {cliente.condicion_pago}</span>
+                    </>
+                  ) : null}
+                </p>
+              </>
             ) : (
               <p className="text-sm text-gray-400 mt-1">Cargando…</p>
             )}
@@ -218,7 +234,7 @@ export default function ClienteCuentaPage() {
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Saldo actual</p>
             <p
               className={`text-2xl font-bold tabular-nums ${
-                saldoDeudor ? 'text-red-600' : 'text-gray-800'
+                saldoDeudor ? 'text-red-600' : 'text-emerald-700'
               }`}
             >
               ${saldoActual.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -257,6 +273,7 @@ export default function ClienteCuentaPage() {
           <option value="cargo">Cargo</option>
           <option value="pago">Pago</option>
           <option value="ajuste">Ajuste</option>
+          <option value="nota_credito">Nota de crédito</option>
         </select>
         <div className="flex items-center gap-2">
           <label className="text-xs text-gray-500 uppercase tracking-wide">Desde</label>
@@ -283,13 +300,14 @@ export default function ClienteCuentaPage() {
 
       <div className="table-wrap">
         <div className="overflow-x-auto">
-          <table className="table-data min-w-[800px]">
+          <table className="table-data min-w-[960px]">
             <thead>
               <tr>
                 <th>Fecha</th>
                 <th>Tipo</th>
                 <th className="text-right">Monto</th>
-                <th>Saldo</th>
+                <th className="text-right">Saldo anterior</th>
+                <th className="text-right">Saldo nuevo</th>
                 <th>Detalle</th>
                 <th>Ref.</th>
               </tr>
@@ -297,13 +315,13 @@ export default function ClienteCuentaPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-500">
+                  <td colSpan={7} className="py-12 text-center text-gray-500">
                     <span className="inline-block h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600" />
                   </td>
                 </tr>
               ) : movs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-14 text-center text-gray-500">Sin movimientos</td>
+                  <td colSpan={7} className="py-14 text-center text-gray-500">No hay movimientos registrados</td>
                 </tr>
               ) : (
                 movs.map(m => (
@@ -324,8 +342,10 @@ export default function ClienteCuentaPage() {
                     <td className="text-right font-semibold tabular-nums text-gray-900">
                       ${Number(m.monto).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                     </td>
-                    <td className="tabular-nums text-gray-700">
-                      {Number(m.saldo_anterior).toLocaleString('es-AR', { minimumFractionDigits: 2 })} →{' '}
+                    <td className="text-right tabular-nums text-gray-700">
+                      {Number(m.saldo_anterior).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td className="text-right tabular-nums text-gray-700">
                       {Number(m.saldo_nuevo).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                     </td>
                     <td className="max-w-[240px] truncate text-gray-600" title={m.detalle ?? ''}>
@@ -387,7 +407,7 @@ export default function ClienteCuentaPage() {
               Cancelar
             </button>
             <button type="button" className="btn-primary" onClick={registrarPago} disabled={guardandoPago}>
-              {guardandoPago ? 'Guardando…' : 'Guardar'}
+              {guardandoPago ? 'Guardando…' : 'Confirmar pago'}
             </button>
           </div>
         }
