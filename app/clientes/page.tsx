@@ -57,13 +57,20 @@ export default function ClientesPage() {
 
     setGuardando(true)
     try {
+      // Convertir saldo y descuento a número
+      const dataToSave = {
+        ...form,
+        saldo: parseFloat(String(form.saldo ?? 0)) || 0,
+        descuento: parseFloat(String(form.descuento ?? 0)) || 0,
+      }
+
       if (modal?.id) {
-        const { error } = await supabase.from('clientes').update(form).eq('id', modal.id)
+        const { error } = await supabase.from('clientes').update(dataToSave).eq('id', modal.id)
         if (error) throw error
         toast.success('Cliente actualizado.')
       } else {
         const maxCod = clientes.reduce((m, c) => Math.max(m, c.codigo), 0)
-        const { error } = await supabase.from('clientes').insert({ ...form, codigo: maxCod + 1 })
+        const { error } = await supabase.from('clientes').insert({ ...dataToSave, codigo: maxCod + 1 })
         if (error) throw error
         toast.success('Cliente creado.')
       }
@@ -192,6 +199,7 @@ export default function ClientesPage() {
             { label: 'CUIT', key: 'cuit' as const, col: 1 },
             { label: 'Condición de pago', key: 'condicion_pago' as const, col: 1 },
             { label: 'Descuento %', key: 'descuento' as const, col: 1 },
+            { label: 'Saldo', key: 'saldo' as const, col: 1 },
           ].map(({ label, key, col, required }) => (
             <div key={key} className={col === 2 ? 'col-span-2' : ''}>
               <label className="mb-1.5 block text-xs font-semibold text-gray-600">{label}</label>

@@ -17,7 +17,8 @@
     "jspdf-autotable": "^3.8.2",
     "date-fns": "^3.3.1",
     "lucide-react": "^0.469.0",
-    "sonner": "^1.7.1"
+    "sonner": "^1.7.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "typescript": "^5",

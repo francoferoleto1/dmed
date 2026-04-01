@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
+import ImportExcel from '@/components/ImportExcel'
 import Modal from '@/components/ui/Modal'
 import TableSkeleton from '@/components/ui/TableSkeleton'
 import { createClient, Articulo } from '@/lib/supabase'
@@ -135,10 +136,13 @@ function ArticulosPageContent() {
             <span className="font-semibold text-gray-900">{articulos.length}</span> artículos
           </p>
         </div>
-        <button type="button" onClick={abrirNuevo} className="btn-primary w-full sm:w-auto">
-          <Plus className="h-4 w-4" />
-          Nuevo artículo
-        </button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+          <ImportExcel onImported={cargar} />
+          <button type="button" onClick={abrirNuevo} className="btn-primary w-full sm:w-auto">
+            <Plus className="h-4 w-4" />
+            Nuevo artículo
+          </button>
+        </div>
       </div>
 
       <div className="mb-5 flex flex-col gap-3 rounded-2xl border border-gray-200/80 bg-white p-4 shadow-card md:flex-row md:items-end md:gap-4">

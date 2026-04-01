@@ -10,12 +10,7 @@ export function stockStatus(stock: number): StockStatus {
   return 'ok'
 }
 
-/** Pill/badge para columna stock en listados (fondo + texto). */
-export function stockPillClass(stock: number): string {
-  const s = stockStatus(stock)
-  const base =
-    'inline-flex min-w-[3.25rem] justify-end rounded-full px-2.5 py-1 text-sm font-semibold tabular-nums ring-1 ring-inset'
-  if (s === 'sin') return `${base} bg-red-50 text-red-700 ring-red-100`
-  if (s === 'bajo') return `${base} bg-amber-50 text-amber-800 ring-amber-100`
-  return `${base} bg-emerald-50 text-emerald-800 ring-emerald-100`
+/** Clase simple para la columna stock — sin pills ni colores estridentes. */
+export function stockPillClass(_stock: number): string {
+  return 'text-sm font-medium tabular-nums text-gray-900'
 }
